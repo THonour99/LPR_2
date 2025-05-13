@@ -158,20 +158,151 @@ void PlateRecognitionWindow::processFrame()
 
 QString PlateRecognitionWindow::recognizePlate(const cv::Mat &image)
 {
-    // 简化版车牌识别
-    // 实际项目中应该使用OpenCV以及可能的第三方库来识别车牌
-    // 这里仅作为示例，返回一个固定的车牌号码或从用户输入获取
+    // 创建原始图像的副本
+    cv::Mat processedImage = image.clone();
     
-    // 这里可以实现车牌识别算法
-    // 但由于复杂度较高，这里仅仅模拟识别过程
+    // 创建用于显示处理结果的图像
+    cv::Mat debugImage = image.clone();
     
-    // 模拟车牌识别（实际项目应替换为真实的车牌识别算法）
-    // 简单起见，让用户输入识别结果，以模拟实际识别
-    bool ok;
-    QString plateNumber = QInputDialog::getText(this, "车牌识别结果", 
-                                              "请输入识别的车牌号码(实际项目中应为自动识别):", 
+    // 1. 调整图像大小，确保宽度不超过1000像素，以提高处理速度
+    double scale = 1.0;
+    if (processedImage.cols > 1000) {
+        scale = 1000.0 / processedImage.cols;
+        cv::resize(processedImage, processedImage, cv::Size(), scale, scale);
+        cv::resize(debugImage, debugImage, cv::Size(), scale, scale);
+    }
+    
+    // 2. 转换到HSV色彩空间，车牌蓝色区域更容易提取
+    cv::Mat hsv;
+    cv::cvtColor(processedImage, hsv, cv::COLOR_BGR2HSV);
+    
+    // 3. 根据中国蓝牌的颜色范围提取蓝色区域
+    cv::Mat blueMask;
+    cv::inRange(hsv, cv::Scalar(100, 70, 70), cv::Scalar(140, 255, 255), blueMask);
+    
+    // 也可以尝试检测黄色牌照
+    cv::Mat yellowMask;
+    cv::inRange(hsv, cv::Scalar(15, 70, 70), cv::Scalar(40, 255, 255), yellowMask);
+    
+    // 合并蓝色和黄色掩码
+    cv::Mat colorMask = blueMask | yellowMask;
+    
+    // 形态学操作，清理掩码
+    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5, 5));
+    cv::morphologyEx(colorMask, colorMask, cv::MORPH_OPEN, kernel);
+    cv::morphologyEx(colorMask, colorMask, cv::MORPH_CLOSE, kernel);
+    
+    // 显示颜色筛选结果
+    cv::imshow("Color Mask", colorMask);
+    
+    // 4. 转换为灰度图像
+    cv::Mat gray;
+    cv::cvtColor(processedImage, gray, cv::COLOR_BGR2GRAY);
+    
+    // 5. 高斯模糊减少噪声
+    cv::GaussianBlur(gray, gray, cv::Size(5, 5), 0);
+    
+    // 6. Sobel边缘检测（X方向，车牌边缘在水平方向上变化明显）
+    cv::Mat sobel;
+    cv::Sobel(gray, sobel, CV_8U, 1, 0, 3);
+    
+    // 7. 二值化
+    cv::Mat binary;
+    cv::threshold(sobel, binary, 0, 255, cv::THRESH_OTSU + cv::THRESH_BINARY);
+    
+    // 8. 形态学闭操作，填充空洞
+    cv::Mat element = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(17, 3));
+    cv::morphologyEx(binary, binary, cv::MORPH_CLOSE, element);
+    
+    // 显示边缘检测结果
+    cv::imshow("Edge Detection", binary);
+    
+    // 9. 查找轮廓
+    std::vector<std::vector<cv::Point>> contours;
+    cv::findContours(binary, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+    
+    // 10. 绘制所有轮廓，用于调试
+    cv::drawContours(debugImage, contours, -1, cv::Scalar(0, 255, 0), 1);
+    cv::imshow("All Contours", debugImage);
+    
+    // 11. 遍历轮廓，寻找车牌区域
+    std::vector<cv::Rect> possiblePlates;
+    for (const auto& contour : contours) {
+        cv::Rect rect = cv::boundingRect(contour);
+        
+        // 根据车牌的长宽比例和面积筛选
+        double ratio = (double)rect.width / rect.height;
+        double area = rect.width * rect.height;
+        int minArea = 2000 * scale * scale; // 根据缩放比例调整最小面积
+        
+        // 中国车牌比例约为3.0-3.5，面积要足够大
+        if (ratio > 2.5 && ratio < 4.5 && area > minArea) {
+            // 检查这个区域是否包含足够的蓝色或黄色像素
+            cv::Mat plateColorMask = colorMask(rect);
+            int colorPixels = cv::countNonZero(plateColorMask);
+            double colorRatio = (double)colorPixels / area;
+            
+            // 如果颜色匹配度较高，更可能是车牌
+            if (colorRatio > 0.2) {
+                possiblePlates.push_back(rect);
+                
+                // 在调试图像中标记潜在的车牌
+                cv::rectangle(debugImage, rect, cv::Scalar(0, 0, 255), 2);
+            }
+        }
+    }
+    
+    // 显示可能的车牌区域
+    cv::imshow("Possible Plates", debugImage);
+    
+    // 12. 如果找到可能的车牌区域，进行进一步处理
+    if (!possiblePlates.empty()) {
+        // 按面积排序，通常最大的符合条件的矩形最可能是车牌
+        std::sort(possiblePlates.begin(), possiblePlates.end(), 
+                 [](const cv::Rect& a, const cv::Rect& b) {
+                     return a.area() > b.area();
+                 });
+        
+        // 取最可能的车牌区域
+        cv::Rect plateRect = possiblePlates[0];
+        
+        // 提取车牌ROI
+        cv::Mat plateROI = processedImage(plateRect);
+        
+        // 显示可能的车牌区域
+        cv::resize(plateROI, plateROI, cv::Size(plateROI.cols * 2, plateROI.rows * 2));
+        cv::imshow("Plate ROI", plateROI);
+        
+        // 转为灰度并进行自适应阈值处理，以准备字符分割
+        cv::Mat plateGray;
+        cv::cvtColor(plateROI, plateGray, cv::COLOR_BGR2GRAY);
+        cv::Mat plateBinary;
+        cv::adaptiveThreshold(plateGray, plateBinary, 255, cv::ADAPTIVE_THRESH_GAUSSIAN_C, 
+                             cv::THRESH_BINARY_INV, 11, 2);
+        
+        // 显示二值化的车牌
+        cv::imshow("Plate Binary", plateBinary);
+        
+        // 这里可以添加更多的字符分割和OCR处理代码
+        // 实际项目中，应该使用OCR引擎或深度学习模型进行字符识别
+        
+        // 由于我们没有实现完整的OCR，请用户确认识别结果
+        bool ok;
+        QString plateNumber = QInputDialog::getText(this, "车牌识别确认", 
+                                              "检测到可能的车牌区域，请确认或修改车牌号码:",
                                               QLineEdit::Normal, 
                                               "粤B12345", &ok);
+        if (ok && !plateNumber.isEmpty()) {
+            return plateNumber;
+        }
+    }
+    
+    // 如果没有检测到车牌，询问用户手动输入
+    bool ok;
+    QString plateNumber = QInputDialog::getText(this, "手动输入车牌号码", 
+                                           "未能自动识别车牌，请手动输入车牌号码:", 
+                                           QLineEdit::Normal, 
+                                           "", &ok);
     if (ok && !plateNumber.isEmpty()) {
         return plateNumber;
     }
