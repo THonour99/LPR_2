@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>900</width>
+    <height>600</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>停车场预约管理系统</string>
+  </property>
+  <widget class="QWidget" name="centralwidget"/>
+  <widget class="QMenuBar" name="menubar">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>900</width>
+     <height>21</height>
+    </rect>
+   </property>
+   <widget class="QMenu" name="menuParkingSystem">
+    <property name="title">
+     <string>系统</string>
+    </property>
+    <addaction name="actionPlateRecognition"/>
+    <addaction name="actionParkingReservation"/>
+    <addaction name="separator"/>
+    <addaction name="actionLogout"/>
+   </widget>
+   <addaction name="menuParkingSystem"/>
+  </widget>
+  <widget class="QStatusBar" name="statusbar"/>
+  <action name="actionPlateRecognition">
+   <property name="text">
+    <string>车牌识别</string>
+   </property>
+  </action>
+  <action name="actionParkingReservation">
+   <property name="text">
+    <string>停车场预约</string>
+   </property>
+  </action>
+  <action name="actionLogout">
+   <property name="text">
+    <string>退出登录</string>
+   </property>
+  </action>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
